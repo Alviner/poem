@@ -51,11 +51,7 @@ def test_file_version(
     version_module = module_from_spec(spec)
     spec.loader.exec_module(version_module)
     assert version_module.__version__ == str(expected_version)
-    assert version_module.version_info == (
-        expected_version.major,
-        expected_version.minor,
-        expected_version.patch,
-    )
+    assert version_module.version_info == expected_version.release[:3]
 
 
 def test_pyproject_version(

@@ -49,6 +49,8 @@ Here are some of the arguments that you can use for `git` provider:
 |-------|-------------|---------|
 | `version_prefix` | filter tags only starts with this prefix | `v` |
 | `format` | plugin will use commit hash (long) or not (short) to build a project version | `short` |
+| `bump_segment` | plugin will bump the selected version's segment with the number of commits after the last tag (allowed `release`, `post`, `dev`) | `release` |
+
 
 Example:
 
@@ -71,6 +73,19 @@ Building awesome_package (0.1.0)
   - Building wheel
   - Built awesome_package-0.1.0-py3-none-any.whl
 ```
+
+Logic behind `bump_segment` with 10 commits:
+* `release`: bumps `patch` (as in `<major>.<minor>.<patch>`) or the lowest
+  * `1 -> 1.0.10`
+  * `1.0 -> 1.0.10`
+  * `1.0.2 -> 1.0.12`  
+  * `1.0.0.2 -> 1.0.0.12`
+* `post`: bumps `post`
+  * `1.0 -> 1.0.post10`
+  * `1.0.post2 -> 1.0.post12`
+* `dev`: bumps `dev`
+  * `1.0 -> 1.0.dev10`
+  * `1.0.dev2 -> 1.0.dev12`
 
 ## How to develop
 

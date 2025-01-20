@@ -3,10 +3,10 @@ import subprocess
 import warnings
 from dataclasses import dataclass
 from shutil import which
-from types import MappingProxyType
-from typing import Any, Callable, ClassVar, Mapping, Match, Optional
 
-from poem_plugins.config.git import GitProviderSettings, GitVersionFormatEnum
+from poem_plugins.config.git import (
+    GitProviderSettings, GitVersionFormatEnum, VersionSegmentBumpEnum,
+)
 from poem_plugins.general.version import Version
 from poem_plugins.general.version.drivers import IVersionDriver
 
@@ -32,17 +32,59 @@ class GitVersionDriver(IVersionDriver):
         '__version__ = "{version}"\n'
     )
 
-    CONVERTERS: ClassVar[
-        Mapping[str, Callable[[Any], Any]]
-    ] = MappingProxyType(
-        {
-            "major": int,
-            "minor": int,
-            "patch": int,
-        },
-    )
+    def _get_version_pep_440(self, raw_version: str) -> Version:
+        if raw_version.startswith(self.settings.version_prefix):
+            raw_version = raw_version.removeprefix(self.settings.version_prefix)
+        else:
+            raise RuntimeError(
+                f"Version tag must start with '{self.settings.version_prefix}' "
+                f"as defined in the plugin's config (or by default).",
+            )
+        regex = (
+            r"^((?P<epoch>\d+)!)?(?P<release>\d+(\.\d+)*)"
+            r"(?P<pre>(a|b|rc)\d+)?(\.post(?P<post>\d+))?(\.dev(?P<dev>\d+))?"
+            r"-(?P<commit_count>\d+)-(?P<commit>\S+)$"
+        )
+        match = re.match(regex, raw_version)
+        if not match:
+            raise RuntimeError(
+                f"Failed to parse git version: '{raw_version}' must conform to "
+                f"PEP 440",
+            )
+        groups = match.groupdict()
+        epoch = groups["epoch"]
+        pre, post, dev = groups["pre"], groups["post"], groups["dev"]
+        commit_count = int(groups["commit_count"])
+        commit = groups["commit"]
+        release = list(map(int, groups["release"].split(".")))
+        if len(release) < 3:
+            release += [0] * (3 - len(release))
 
-    def get_version(self) -> Version:
+        segments = {
+            "epoch": int(epoch) if epoch is not None else None,
+            "pre": pre,
+            "post": int(post) if post is not None else None,
+            "dev": int(dev) if dev is not None else None,
+            "commit": commit,
+        }
+
+        if commit_count:
+            bump_segment = self.settings.bump_segment
+            if bump_segment == VersionSegmentBumpEnum.RELEASE:
+                print(release)
+                release[-1] += commit_count
+            else:
+                segments[bump_segment.value] = segments[bump_segment.value] or 0
+                segments[bump_segment.value] += commit_count  # type: ignore
+
+        segments["release"] = tuple(release)
+
+        if self.settings.format == GitVersionFormatEnum.SHORT:
+            segments["commit"] = None
+
+        return Version(**segments)  # type: ignore
+
+    def _git_describe(self) -> str:
         if GIT_BIN is None:
             raise RuntimeError(WARNING_TEXT)
 
@@ -53,27 +95,12 @@ class GitVersionDriver(IVersionDriver):
         )
 
         if result.returncode != 0:
-            raise RuntimeError("Cannot found git version")
-        raw_version = result.stdout.strip()
-        regex = (
-            r"(?P<major>\d+)\.(?P<minor>\d+)-(?P<patch>\d+)-(?P<commit>\S+)"
-        )
-        match: Optional[Match[str]] = re.match(
-            self.settings.version_prefix + regex,
-            raw_version,
-        )
+            raise RuntimeError("Failed to find git version tag")
+        return result.stdout.strip()
 
-        if match is None:
-            raise RuntimeError("Cannot parse git version")
-        raw_kwargs = dict(match.groupdict())
-        if self.settings.format == GitVersionFormatEnum.SHORT:
-            raw_kwargs.pop("commit", None)
-        kwargs = {
-            k: self.CONVERTERS.get(k, lambda x: x)(v)
-            for k, v in raw_kwargs.items()
-        }
-
-        return Version(**kwargs)
+    def get_version(self) -> Version:
+        raw_version = self._git_describe()
+        return self._get_version_pep_440(raw_version)
 
     def render_version_file(
         self,
@@ -81,8 +108,8 @@ class GitVersionDriver(IVersionDriver):
     ) -> str:
         return self.VERSION_TEMPLATE.format(
             whoami='poem-plugins "git" plugin',
-            major=version.major,
-            minor=version.minor,
-            patch=version.patch,
+            major=version.release[0],
+            minor=version.release[1],
+            patch=version.release[2],
             version=str(version),
         )

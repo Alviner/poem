@@ -38,8 +38,9 @@ def simple_project(tmpdir) -> Iterator[Path]:
 
 @pytest.fixture
 def expected_long_version() -> Version:
-    return Version(1, 2, 0, "g3c3e199")
+    return Version(release=(1, 2, 0), commit="g3c3e199")
+
 
 @pytest.fixture
 def expected_version() -> Version:
-    return Version(1, 2, 0)
+    return Version(release=(1, 2, 0))
